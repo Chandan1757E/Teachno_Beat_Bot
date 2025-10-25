@@ -39,7 +39,7 @@ def init_db():
     ''')
     
     # Add yourself as admin - YAHAN APNA USER_ID DALEN
-    YOUR_USER_ID = 123456789  # CHANGE THIS TO YOUR ACTUAL USER ID
+    YOUR_USER_ID = 1614927658  # CHANGE THIS TO YOUR ACTUAL USER ID
     cursor.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (YOUR_USER_ID,))
     
     conn.commit()
