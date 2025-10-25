@@ -1,489 +1,421 @@
-import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters, CallbackQueryHandler
 import sqlite3
-from datetime import datetime, timedelta
+import re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.constants import ParseMode
+import asyncio
 
-# Professional logging setup
+# Bot Configuration
+BOT_TOKEN = "6990761692:AAHI_E2l00AJxr9ue4mRKjG5uetPBXKp0rk"
+CHANNEL_LINK = "https://t.me/Techno_Beats_Redirect"
+OWNER_ID = 1614927658
+OWNER_USERNAME = "@Chandan1757E"
+CHANNEL_NAME = "Techno Beat's"
+
+# Set up logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
-class TechnoBeatsBot:
-    def __init__(self):
-        self.owner_username = "@Chandan1757E"
-        self.bot_username = "@TechnoBeatsBot"
-        self.init_db()
+# Database setup
+def init_db():
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
     
-    def init_db(self):
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        # Users table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                chat_id INTEGER,
-                join_date TIMESTAMP,
-                is_approved BOOLEAN DEFAULT TRUE,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                total_messages INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # Admins table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS admins (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                added_date TIMESTAMP
-            )
-        ''')
-        
-        # User activity log
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_activity (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                activity_type TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Channels table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS channels (
-                channel_id INTEGER PRIMARY KEY,
-                channel_name TEXT,
-                added_date TIMESTAMP
-            )
-        ''')
-        
-        # Add main admin
-        cursor.execute(
-            'INSERT OR IGNORE INTO admins (user_id, username, added_date) VALUES (?, ?, ?)',
-            (1614927658, 'Owner', datetime.now())
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            is_banned INTEGER DEFAULT 0,
+            is_muted INTEGER DEFAULT 0,
+            warnings INTEGER DEFAULT 0,
+            join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        
-        conn.commit()
-        conn.close()
+    ''')
     
-    def start(self, update: Update, context: CallbackContext):
-        user = update.effective_user
-        self.save_user(user, update.effective_chat.id)
-        
-        # Create contact button
-        keyboard = [
-            [InlineKeyboardButton("Contact Owner", url=f"https://t.me/{self.owner_username[1:]}")],
-            [InlineKeyboardButton("Join Channel", url="https://t.me/your_channel_here")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        response = f"""
-Welcome to Techno Beat's Official Bot
-
-Hello {user.first_name},
-
-Thank you for connecting with Techno Beat's. Our bot provides automated management for our channels and groups.
-
-Available Commands:
-/start - Initialize the bot
-/myinfo - Display your information  
-/help - Command assistance
-/contact - Get owner contact details
-
-Admin Commands:
-/activeusers - View active users list
-/allusers - Complete users database
-/broadcast - Send message to all users
-/stats - System statistics
-
-For immediate assistance, use the contact button below.
-        """
-        update.message.reply_text(response, reply_markup=reply_markup)
-    
-    def contact_owner(self, update: Update, context: CallbackContext):
-        keyboard = [
-            [InlineKeyboardButton("Message Owner", url=f"https://t.me/{self.owner_username[1:]}")],
-            [InlineKeyboardButton("Join Main Channel", url="https://t.me/your_channel_here")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        response = f"""
-Contact Information
-
-Owner: {self.owner_username}
-Bot: {self.bot_username}
-
-For business inquiries, collaborations, or technical support, please contact our owner directly.
-
-We typically respond within 24 hours.
-
-Click the button below to start a conversation.
-        """
-        update.message.reply_text(response, reply_markup=reply_markup)
-    
-    def myinfo(self, update: Update, context: CallbackContext):
-        user = update.effective_user
-        
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'SELECT join_date, total_messages FROM users WHERE user_id = ?', 
-            (user.id,)
+    # Groups table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS groups (
+            chat_id INTEGER PRIMARY KEY,
+            title TEXT,
+            welcome_message TEXT,
+            leave_message TEXT,
+            filter_links INTEGER DEFAULT 1,
+            filter_sexual INTEGER DEFAULT 1
         )
-        user_data = cursor.fetchone()
-        conn.close()
-        
-        join_date = user_data[0] if user_data else "Not recorded"
-        total_messages = user_data[1] if user_data else 0
-        
-        response = f"""
-User Information
+    ''')
+    
+    # Broadcast messages table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broadcast_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_text TEXT,
+            sent_by INTEGER,
+            sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-User ID: {user.id}
-Name: {user.first_name} {user.last_name or ''}
-Username: {f'@{user.username}' if user.username else 'Not set'}
-Chat ID: {update.effective_chat.id}
-Status: Verified
-Registration: {join_date}
-Messages Sent: {total_messages}
+init_db()
 
-Techno Beat's Member
+# Emoji configurations
+EMOJIS = {
+    'welcome': '👋',
+    'leave': '😢',
+    'warning': '⚠️',
+    'success': '✅',
+    'error': '❌',
+    'info': 'ℹ️',
+    'user': '👤',
+    'group': '👥',
+    'channel': '📢',
+    'admin': '👑',
+    'settings': '⚙️',
+    'ban': '🔨',
+    'mute': '🔇',
+    'unban': '🔓',
+    'unmute': '🔊',
+    'broadcast': '📡',
+    'filter': '🛡️'
+}
+
+# Welcome and Leave Messages
+WELCOME_MESSAGE = f"""
+{EMOJIS['welcome']} *Welcome to Our Family!* {EMOJIS['welcome']}
+
+🎉 *Congratulations!* You have successfully joined *{CHANNEL_NAME}*!
+
+{EMOJIS['success']} *What you'll get here:*
+• 📱 Latest Technology Updates
+• 🔧 Android Tips & Tricks
+• 💡 Useful Tech Guides
+• 🚀 Productivity Hacks
+• 🔒 Security Tips
+
+🌟 *We're excited to have you!* 
+Get ready for amazing content that will enhance your digital experience!
+
+{EMOJIS['info']} *Note:* If you face any issues, contact {OWNER_USERNAME}
+"""
+
+LEAVE_MESSAGE = f"""
+{EMOJIS['leave']} *We're Sad to See You Go!* {EMOJIS['leave']}
+
+😔 *You have left* *{CHANNEL_NAME}*
+
+{EMOJIS['info']} *We're sorry if:*
+• You faced any issues
+• Content wasn't as expected
+• There were too many messages
+
+💭 *Your feedback matters!* 
+If you have any concerns or suggestions, please contact {OWNER_USERNAME}
+
+We hope to see you again soon! 🌟
+"""
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    keyboard = [
+        [InlineKeyboardButton(f"{EMOJIS['channel']} Join Channel", url=CHANNEL_LINK)],
+        [InlineKeyboardButton(f"{EMOJIS['info']} User Info", callback_data='user_info'),
+         InlineKeyboardButton(f"{EMOJIS['admin']} Admin Panel", callback_data='admin_panel')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    welcome_text = f"""
+{EMOJIS['welcome']} *Hello {user.first_name}!* {EMOJIS['welcome']}
+
+🤖 *Welcome to Techno Beat's Bot!*
+
+{EMOJIS['success']} *Features Available:*
+• 📊 User Management
+• 🛡️ Content Filtering
+• 📢 Broadcasting
+• 👋 Welcome Messages
+• 😢 Leave Messages
+• 🔧 And much more!
+
+Use buttons below to navigate:
+    """
+    
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == 'user_info':
+        user = query.from_user
+        user_info = f"""
+{EMOJIS['user']} *User Information* {EMOJIS['user']}
+
+*🆔 User ID:* `{user.id}`
+*👤 Name:* {user.first_name}
+*📛 Username:* @{user.username if user.username else 'N/A'}
+*🔗 Profile Link:* [Click Here](tg://user?id={user.id})
+
+{EMOJIS['info']} *Bot Features:*
+• Get your chat ID
+• User management
+• Content filtering
+• Broadcast messages
         """
-        update.message.reply_text(response)
+        await query.edit_message_text(
+            user_info,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]])
+        )
     
-    def help_command(self, update: Update, context: CallbackContext):
-        keyboard = [
-            [InlineKeyboardButton("Contact Support", url=f"https://t.me/{self.owner_username[1:]}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        response = """
-Techno Beat's Bot - Command Reference
+    elif query.data == 'admin_panel':
+        if query.from_user.id == OWNER_ID:
+            keyboard = [
+                [InlineKeyboardButton(f"{EMOJIS['broadcast']} Broadcast", callback_data='broadcast'),
+                 InlineKeyboardButton(f"{EMOJIS['user']} User List", callback_data='user_list')],
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Settings", callback_data='settings'),
+                 InlineKeyboardButton(f"{EMOJIS['info']} Bot Info", callback_data='bot_info')],
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]
+            ]
+            admin_text = f"""
+{EMOJIS['admin']} *Admin Panel* {EMOJIS['admin']}
 
-User Commands:
-/start - Initialize bot session
-/myinfo - Display user profile
-/help - Command information
-/contact - Contact owner
+*Available Commands:*
+• 📊 User statistics
+• 📢 Broadcast messages
+• 🛡️ Content filtering
+• 👥 Group management
+• ⚙️ Bot settings
 
-Administrator Commands:
-/activeusers - Recent active users (24h)
-/allusers - Complete user database  
-/broadcast - Global message distribution
-/stats - System performance metrics
-
-Channel Features:
-• Automatic welcome messages
-• Leave notification system
-• Member tracking
-
-For administrative access or channel management, contact the owner.
-        """
-        update.message.reply_text(response, reply_markup=reply_markup)
-    
-    def handle_new_chat_members(self, update: Update, context: CallbackContext):
-        """Automatically send welcome message when users join channel/group"""
-        for new_member in update.message.new_chat_members:
-            if new_member.id != context.bot.id:  # Ignore bot itself
-                chat_title = update.effective_chat.title
-                
-                welcome_message = f"""
-Welcome to {chat_title}
-
-Hello {new_member.first_name},
-
-You have successfully joined {chat_title}. Thank you for becoming part of our community.
-
-We regularly share updates, content, and announcements here. Please make sure to read the channel rules and guidelines.
-
-If you have any questions or need assistance, feel free to contact our owner {self.owner_username}.
-
-We're glad to have you with us!
-                """
-                
-                try:
-                    context.bot.send_message(
-                        chat_id=new_member.id,
-                        text=welcome_message
-                    )
-                except Exception as e:
-                    logger.error(f"Could not send welcome message to {new_member.id}: {e}")
-                    # Send in the group if DM fails
-                    update.message.reply_text(
-                        f"Welcome {new_member.first_name}! Please check your DM for important information."
-                    )
-    
-    def handle_left_chat_member(self, update: Update, context: CallbackContext):
-        """Automatically send message when users leave channel/group"""
-        left_member = update.message.left_chat_member
-        chat_title = update.effective_chat.title
-        
-        if left_member.id != context.bot.id:  # Ignore bot itself
-            leave_message = f"""
-Regarding Your Departure from {chat_title}
-
-Hello {left_member.first_name},
-
-We noticed you've left {chat_title}. We're sorry to see you go.
-
-Could you share your reason for leaving? Your feedback helps us improve our community.
-
-If you encountered any issues or have suggestions, please contact our owner {self.owner_username}. We'd appreciate the opportunity to address any concerns you might have.
-
-Thank you for being part of our community, and we hope to welcome you back in the future.
+Select an option:
             """
+            await query.edit_message_text(
+                admin_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await query.edit_message_text(
+                f"{EMOJIS['error']} *Access Denied!* {EMOJIS['error']}\n\nYou are not authorized to access admin panel.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    
+    elif query.data == 'back_start':
+        await start(update, context)
+
+async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(
+        f"{EMOJIS['info']} *Chat ID:* `{chat_id}`",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def user_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        return
+    
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT user_id, username, first_name FROM users LIMIT 50")
+    users = cursor.fetchall()
+    conn.close()
+    
+    user_list_text = f"{EMOJIS['user']} *Active Users List* {EMOJIS['user']}\n\n"
+    user_list_text += f"*Total Users:* {total_users}\n\n"
+    
+    for user_id, username, first_name in users:
+        user_info = f"• {first_name} (@{username if username else 'N/A'}) - `{user_id}`\n"
+        user_list_text += user_info
+    
+    await update.message.reply_text(
+        user_list_text,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            f"{EMOJIS['info']} Usage: /broadcast <message>"
+        )
+        return
+    
+    message = ' '.join(context.args)
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    
+    success = 0
+    failed = 0
+    
+    for user_id, in users:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"{EMOJIS['broadcast']} *Broadcast Message* {EMOJIS['broadcast']}\n\n{message}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            success += 1
+        except:
+            failed += 1
+        await asyncio.sleep(0.1)
+    
+    await update.message.reply_text(
+        f"{EMOJIS['success']} *Broadcast Completed!*\n\n✅ Success: {success}\n❌ Failed: {failed}",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for member in update.message.new_chat_members:
+        if member.id == context.bot.id:
+            # Bot added to group/channel
+            chat = update.effective_chat
+            conn = sqlite3.connect('bot_database.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO groups (chat_id, title, welcome_message, leave_message)
+                VALUES (?, ?, ?, ?)
+            ''', (chat.id, chat.title, WELCOME_MESSAGE, LEAVE_MESSAGE))
+            conn.commit()
+            conn.close()
             
-            try:
-                context.bot.send_message(
-                    chat_id=left_member.id,
-                    text=leave_message
-                )
-            except Exception as e:
-                logger.error(f"Could not send leave message to {left_member.id}: {e}")
-    
-    def active_users(self, update: Update, context: CallbackContext):
-        if not self.is_admin(update.effective_user.id):
-            update.message.reply_text("Administrator authorization required")
-            return
-        
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        time_threshold = datetime.now() - timedelta(hours=24)
-        cursor.execute('''
-            SELECT user_id, username, first_name, last_active, total_messages 
-            FROM users 
-            WHERE last_active > ? AND is_approved = TRUE
-            ORDER BY last_active DESC
-        ''', (time_threshold,))
-        
-        active_users = cursor.fetchall()
-        conn.close()
-        
-        if not active_users:
-            update.message.reply_text("No active users in the last 24 hours")
-            return
-        
-        response = "Active Users - Last 24 Hours\n\n"
-        
-        for idx, user in enumerate(active_users, 1):
-            user_id, username, first_name, last_active, total_messages = user
-            last_active_time = datetime.strptime(last_active, '%Y-%m-%d %H:%M:%S.%f')
-            hours_ago = int((datetime.now() - last_active_time).total_seconds() / 3600)
+            await update.message.reply_text(
+                f"{EMOJIS['success']} *Thanks for adding me!* {EMOJIS['success']}\n\n"
+                f"I'm now ready to manage this {chat.type}!\n\n"
+                f"Use /settings to configure welcome/leave messages."
+            )
+        else:
+            # Regular user joined
+            chat_title = update.effective_chat.title
+            welcome_msg = WELCOME_MESSAGE.replace(CHANNEL_NAME, chat_title)
             
-            response += f"{idx}. {first_name}"
-            if username:
-                response += f" (@{username})"
-            response += f"\n   ID: {user_id} | Messages: {total_messages}"
-            response += f"\n   Last active: {hours_ago} hours ago\n\n"
-        
-        update.message.reply_text(response)
-    
-    def all_users(self, update: Update, context: CallbackContext):
-        if not self.is_admin(update.effective_user.id):
-            update.message.reply_text("Administrator authorization required")
-            return
-        
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT user_id, username, first_name, last_active, total_messages, is_approved 
-            FROM users 
-            ORDER BY last_active DESC
-        ''')
-        
-        all_users = cursor.fetchall()
-        conn.close()
-        
-        if not all_users:
-            update.message.reply_text("No users in database")
-            return
-        
-        total_users = len(all_users)
-        approved_users = len([u for u in all_users if u[5]])
-        
-        response = f"User Database - Techno Beat's\n\n"
-        response += f"Total Users: {total_users}\n"
-        response += f"Verified Users: {approved_users}\n"
-        response += f"Pending Verification: {total_users - approved_users}\n\n"
-        
-        for idx, user in enumerate(all_users[:15], 1):
-            user_id, username, first_name, last_active, total_messages, is_approved = user
-            status = "Verified" if is_approved else "Pending"
-            
-            response += f"{idx}. {first_name}"
-            if username:
-                response += f" (@{username})"
-            response += f"\n   ID: {user_id} | Status: {status}"
-            response += f" | Messages: {total_messages}\n\n"
-        
-        if total_users > 15:
-            response += f"Displaying 15 of {total_users} users"
-        
-        update.message.reply_text(response)
-    
-    def broadcast(self, update: Update, context: CallbackContext):
-        if not self.is_admin(update.effective_user.id):
-            update.message.reply_text("Administrator authorization required")
-            return
-        
-        if not context.args:
-            update.message.reply_text("Usage: /broadcast <message>")
-            return
-        
-        message = ' '.join(context.args)
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT chat_id FROM users WHERE is_approved = TRUE')
-        users = cursor.fetchall()
-        conn.close()
-        
-        success_count = 0
-        broadcast_message = f"Techno Beat's Announcement\n\n{message}\n\n- {self.owner_username}"
-        
-        for user in users:
-            try:
-                context.bot.send_message(chat_id=user[0], text=broadcast_message)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Broadcast failed for {user[0]}: {e}")
-        
-        update.message.reply_text(f"Broadcast delivered to {success_count} users")
-    
-    def stats(self, update: Update, context: CallbackContext):
-        if not self.is_admin(update.effective_user.id):
-            update.message.reply_text("Administrator authorization required")
-            return
-        
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        # Total users
-        cursor.execute('SELECT COUNT(*) FROM users')
-        total_users = cursor.fetchone()[0]
-        
-        # Approved users
-        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = TRUE')
-        approved_users = cursor.fetchone()[0]
-        
-        # Today's active users
-        today = datetime.now().date()
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM user_activity WHERE DATE(timestamp) = ?', (today,))
-        today_active = cursor.fetchone()[0]
-        
-        # Total messages
-        cursor.execute('SELECT SUM(total_messages) FROM users')
-        total_messages = cursor.fetchone()[0] or 0
-        
-        conn.close()
-        
-        response = f"""
-Techno Beat's - System Statistics
+            await update.message.reply_text(
+                welcome_msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
 
-User Metrics:
-Total Users: {total_users}
-Verified Users: {approved_users}
-Pending Verification: {total_users - approved_users}
+async def handle_left_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.left_chat_member:
+        chat_title = update.effective_chat.title
+        leave_msg = LEAVE_MESSAGE.replace(CHANNEL_NAME, chat_title)
+        
+        await update.message.reply_text(
+            leave_msg,
+            parse_mode=ParseMode.MARKDOWN
+        )
 
-Activity Metrics:
-Active Today: {today_active}
-Total Messages: {total_messages}
+async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.message.chat.type == 'private':
+        return
+    
+    message_text = update.message.text or update.message.caption or ''
+    user_id = update.message.from_user.id
+    chat_id = update.message.chat.id
+    
+    # Check if user is admin
+    chat_member = await context.bot.get_chat_member(chat_id, user_id)
+    if chat_member.status in ['administrator', 'creator']:
+        return
+    
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT filter_links, filter_sexual FROM groups WHERE chat_id = ?", (chat_id,))
+    group_settings = cursor.fetchone()
+    
+    if not group_settings:
+        conn.close()
+        return
+    
+    filter_links, filter_sexual = group_settings
+    
+    # Link filter
+    if filter_links and re.search(r'https?://|t\.me/|www\.', message_text, re.IGNORECASE):
+        try:
+            await update.message.delete()
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} *Links are not allowed here!* {EMOJIS['warning']}",
+                reply_to_message_id=update.message.message_id
+            )
+        except:
+            pass
+        finally:
+            conn.close()
+            return
+    
+    # Sexual content filter
+    sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked']
+    if filter_sexual and any(keyword in message_text.lower() for keyword in sexual_keywords):
+        try:
+            await update.message.delete()
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} *Inappropriate content detected!* {EMOJIS['warning']}",
+                reply_to_message_id=update.message.message_id
+            )
+        except:
+            pass
+    
+    conn.close()
 
-Channel Management:
-Automatic Welcome: Active
-Leave Notifications: Active
-Owner: {self.owner_username}
-
-System Status: Operational
-        """
-        update.message.reply_text(response)
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text(
+            f"{EMOJIS['settings']} *Settings Menu* {EMOJIS['settings']}\n\n"
+            "This command works in groups/channels only."
+        )
+        return
     
-    def save_user(self, user, chat_id):
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO users 
-            (user_id, username, first_name, last_name, chat_id, join_date, is_approved)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (user.id, user.username, user.first_name, user.last_name, chat_id, datetime.now(), True))
-        
-        conn.commit()
-        conn.close()
+    keyboard = [
+        [InlineKeyboardButton(f"{EMOJIS['filter']} Toggle Link Filter", callback_data='toggle_links'),
+         InlineKeyboardButton(f"{EMOJIS['filter']} Toggle Content Filter", callback_data='toggle_content')],
+        [InlineKeyboardButton(f"{EMOJIS['settings']} Set Welcome Message", callback_data='set_welcome'),
+         InlineKeyboardButton(f"{EMOJIS['settings']} Set Leave Message", callback_data='set_leave')]
+    ]
     
-    def track_activity(self, update: Update, context: CallbackContext):
-        user_id = update.effective_user.id
-        
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE users 
-            SET last_active = ?, total_messages = total_messages + 1 
-            WHERE user_id = ?
-        ''', (datetime.now(), user_id))
-        
-        cursor.execute('''
-            INSERT INTO user_activity (user_id, activity_type) 
-            VALUES (?, ?)
-        ''', (user_id, "message"))
-        
-        conn.commit()
-        conn.close()
-    
-    def is_admin(self, user_id):
-        conn = sqlite3.connect('techno_beats.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM admins WHERE user_id = ?', (user_id,))
-        result = cursor.fetchone()
-        conn.close()
-        return result is not None
+    await update.message.reply_text(
+        f"{EMOJIS['settings']} *Group Settings* {EMOJIS['settings']}\n\n"
+        "Configure your group settings:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 def main():
-    bot = TechnoBeatsBot()
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    # Use your provided token
-    TOKEN = "8280138743:AAH0YE-WfUv5yxKJHsbNaZynXy4MEnvWnjc"
+    # Handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("chatid", get_chat_id))
+    application.add_handler(CommandHandler("userlist", user_list))
+    application.add_handler(CommandHandler("broadcast", broadcast_message))
+    application.add_handler(CommandHandler("settings", settings_command))
     
-    try:
-        updater = Updater(TOKEN, use_context=True)
-        dispatcher = updater.dispatcher
-        
-        # Command handlers
-        dispatcher.add_handler(CommandHandler("start", bot.start))
-        dispatcher.add_handler(CommandHandler("contact", bot.contact_owner))
-        dispatcher.add_handler(CommandHandler("myinfo", bot.myinfo))
-        dispatcher.add_handler(CommandHandler("help", bot.help_command))
-        dispatcher.add_handler(CommandHandler("activeusers", bot.active_users))
-        dispatcher.add_handler(CommandHandler("allusers", bot.all_users))
-        dispatcher.add_handler(CommandHandler("broadcast", bot.broadcast))
-        dispatcher.add_handler(CommandHandler("stats", bot.stats))
-        
-        # Message tracking
-        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, bot.track_activity))
-        
-        # Channel join/leave handlers
-        dispatcher.add_handler(MessageHandler(Filters.status_update.new_chat_members, bot.handle_new_chat_members))
-        dispatcher.add_handler(MessageHandler(Filters.status_update.left_chat_member, bot.handle_left_chat_member))
-        
-        logger.info("Techno Beat's Bot initializing...")
-        updater.start_polling()
-        logger.info("Techno Beat's Bot operational")
-        updater.idle()
-        
-    except Exception as e:
-        logger.error(f"System initialization failed: {e}")
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_chat_members))
+    application.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, handle_left_chat_member))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_filter))
+    
+    # Start the Bot
+    print("Bot is running...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
