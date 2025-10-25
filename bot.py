@@ -51,6 +51,16 @@ def init_db():
         )
     ''')
     
+    # Broadcast messages table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broadcast_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_text TEXT,
+            sent_by INTEGER,
+            sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -77,36 +87,34 @@ EMOJIS = {
     'filter': '🛡️'
 }
 
-# Welcome and Leave Messages
-WELCOME_MESSAGE = f"""
-{EMOJIS['welcome']} *Welcome to Our Family!* {EMOJIS['welcome']}
+# Welcome and Leave Messages - FIXED MARKDOWN
+WELCOME_MESSAGE = f"""{EMOJIS['welcome']} Welcome to Our Family! {EMOJIS['welcome']}
 
-🎉 *Congratulations!* You have successfully joined *{CHANNEL_NAME}*!
+🎉 Congratulations! You have successfully joined {CHANNEL_NAME}!
 
-{EMOJIS['success']} *What you'll get here:*
+{EMOJIS['success']} What you'll get here:
 • 📱 Latest Technology Updates
 • 🔧 Android Tips & Tricks
 • 💡 Useful Tech Guides
 • 🚀 Productivity Hacks
 • 🔒 Security Tips
 
-🌟 *We're excited to have you!* 
+🌟 We're excited to have you! 
 Get ready for amazing content that will enhance your digital experience!
 
-{EMOJIS['info']} *Note:* If you face any issues, contact {OWNER_USERNAME}
+{EMOJIS['info']} Note: If you face any issues, contact {OWNER_USERNAME}
 """
 
-LEAVE_MESSAGE = f"""
-{EMOJIS['leave']} *We're Sad to See You Go!* {EMOJIS['leave']}
+LEAVE_MESSAGE = f"""{EMOJIS['leave']} We're Sad to See You Go! {EMOJIS['leave']}
 
-😔 *You have left* *{CHANNEL_NAME}*
+😔 You have left {CHANNEL_NAME}
 
-{EMOJIS['info']} *We're sorry if:*
+{EMOJIS['info']} We're sorry if:
 • You faced any issues
 • Content wasn't as expected
 • There were too many messages
 
-💭 *Your feedback matters!* 
+💭 Your feedback matters! 
 If you have any concerns or suggestions, please contact {OWNER_USERNAME}
 
 We hope to see you again soon! 🌟
@@ -117,7 +125,7 @@ def add_user_to_db(user):
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR IGNORE INTO users (user_id, username, first_name, last_name)
+        INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
         VALUES (?, ?, ?, ?)
     ''', (user.id, user.username, user.first_name, user.last_name))
     conn.commit()
@@ -134,12 +142,11 @@ def start(update: Update, context: CallbackContext):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    welcome_text = f"""
-{EMOJIS['welcome']} *Hello {user.first_name}!* {EMOJIS['welcome']}
+    welcome_text = f"""{EMOJIS['welcome']} Hello {user.first_name}! {EMOJIS['welcome']}
 
-🤖 *Welcome to Techno Beat's Bot!*
+🤖 Welcome to Techno Beat's Bot!
 
-{EMOJIS['success']} *Features Available:*
+{EMOJIS['success']} Features Available:
 • 📊 User Management
 • 🛡️ Content Filtering
 • 📢 Broadcasting
@@ -147,21 +154,12 @@ def start(update: Update, context: CallbackContext):
 • 😢 Leave Messages
 • 🔧 And much more!
 
-Use buttons below to navigate:
-    """
+Use buttons below to navigate:"""
     
-    if update.message:
-        update.message.reply_text(
-            welcome_text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    else:
-        update.callback_query.message.reply_text(
-            welcome_text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
+    update.message.reply_text(
+        welcome_text,
+        reply_markup=reply_markup
+    )
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -169,26 +167,21 @@ def button_handler(update: Update, context: CallbackContext):
     
     if query.data == 'user_info':
         user = query.from_user
-        user_info = f"""
-{EMOJIS['user']} *User Information* {EMOJIS['user']}
+        user_info = f"""{EMOJIS['user']} User Information {EMOJIS['user']}
 
-*🆔 User ID:* `{user.id}`
-*👤 Name:* {user.first_name}
-*📛 Username:* @{user.username if user.username else 'N/A'}
-*🔗 Profile Link:* [Click Here](tg://user?id={user.id})
+User ID: {user.id}
+Name: {user.first_name}
+Username: @{user.username if user.username else 'N/A'}
 
-{EMOJIS['info']} *Bot Features:*
+{EMOJIS['info']} Bot Features:
 • Get your chat ID
 • User management
 • Content filtering
-• Broadcast messages
-        """
+• Broadcast messages"""
+        
         query.edit_message_text(
-            text=user_info,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
-            ])
+            user_info,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]])
         )
     
     elif query.data == 'admin_panel':
@@ -198,143 +191,44 @@ def button_handler(update: Update, context: CallbackContext):
                  InlineKeyboardButton(f"{EMOJIS['user']} User List", callback_data='user_list')],
                 [InlineKeyboardButton(f"{EMOJIS['settings']} Settings", callback_data='settings'),
                  InlineKeyboardButton(f"{EMOJIS['info']} Bot Info", callback_data='bot_info')],
-                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]
             ]
-            admin_text = f"""
-{EMOJIS['admin']} *Admin Panel* {EMOJIS['admin']}
+            admin_text = f"""{EMOJIS['admin']} Admin Panel {EMOJIS['admin']}
 
-*Available Commands:*
+Available Commands:
 • 📊 User statistics
 • 📢 Broadcast messages
 • 🛡️ Content filtering
 • 👥 Group management
 • ⚙️ Bot settings
 
-Select an option:
-            """
+Select an option:"""
+            
             query.edit_message_text(
-                text=admin_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode=ParseMode.MARKDOWN
+                admin_text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
             query.edit_message_text(
-                text=f"{EMOJIS['error']} *Access Denied!* {EMOJIS['error']}\n\nYou are not authorized to access admin panel.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
-                ])
+                f"{EMOJIS['error']} Access Denied! {EMOJIS['error']}\n\nYou are not authorized to access admin panel."
             )
-    
-    elif query.data == 'user_list':
-        if query.from_user.id == OWNER_ID:
-            conn = sqlite3.connect('bot_database.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM users")
-            total_users = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT user_id, username, first_name FROM users LIMIT 20")
-            users = cursor.fetchall()
-            conn.close()
-            
-            user_list_text = f"{EMOJIS['user']} *Active Users List* {EMOJIS['user']}\n\n"
-            user_list_text += f"*Total Users:* {total_users}\n\n"
-            
-            for user_id, username, first_name in users:
-                user_info = f"• {first_name} (@{username if username else 'no_username'}) - `{user_id}`\n"
-                user_list_text += user_info
-            
-            if total_users > 20:
-                user_list_text += f"\n{EMOJIS['info']} *Showing first 20 users*"
-            
-            query.edit_message_text(
-                text=user_list_text,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
-                ])
-            )
-    
-    elif query.data == 'broadcast':
-        if query.from_user.id == OWNER_ID:
-            query.edit_message_text(
-                text=f"{EMOJIS['broadcast']} *Broadcast Message* {EMOJIS['broadcast']}\n\nUse command: /broadcast <your_message>",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
-                ])
-            )
-    
-    elif query.data == 'bot_info':
-        bot_info_text = f"""
-{EMOJIS['info']} *Bot Information* {EMOJIS['info']}
-
-*🤖 Bot Name:* Techno Beat's Bot
-*👑 Owner:* {OWNER_USERNAME}
-*📢 Channel:* [Techno Beat's]({CHANNEL_LINK})
-
-*🛡️ Features:*
-• User Management
-• Content Filtering
-• Broadcasting
-• Welcome/Leave Messages
-• Admin Controls
-
-*🔧 Version:* 2.0
-*✨ Status:* Active
-        """
-        query.edit_message_text(
-            text=bot_info_text,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
-            ])
-        )
     
     elif query.data == 'back_start':
-        user = query.from_user
-        keyboard = [
-            [InlineKeyboardButton(f"{EMOJIS['channel']} Join Channel", url=CHANNEL_LINK)],
-            [InlineKeyboardButton(f"{EMOJIS['info']} User Info", callback_data='user_info'),
-             InlineKeyboardButton(f"{EMOJIS['admin']} Admin Panel", callback_data='admin_panel')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        welcome_text = f"""
-{EMOJIS['welcome']} *Hello {user.first_name}!* {EMOJIS['welcome']}
-
-🤖 *Welcome to Techno Beat's Bot!*
-
-{EMOJIS['success']} *Features Available:*
-• 📊 User Management
-• 🛡️ Content Filtering
-• 📢 Broadcasting
-• 👋 Welcome Messages
-• 😢 Leave Messages
-• 🔧 And much more!
-
-Use buttons below to navigate:
-        """
-        query.edit_message_text(
-            text=welcome_text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
+        context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Returning to main menu..."
         )
+        start(update, context)
 
 def get_chat_id(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    
     update.message.reply_text(
-        f"{EMOJIS['info']} *Chat Information* {EMOJIS['info']}\n\n"
-        f"*👤 Your User ID:* `{user_id}`\n"
-        f"*💬 Current Chat ID:* `{chat_id}`",
-        parse_mode=ParseMode.MARKDOWN
+        f"{EMOJIS['info']} Chat ID: {chat_id}"
     )
 
-def user_list_command(update: Update, context: CallbackContext):
+def user_list(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        update.message.reply_text(f"{EMOJIS['error']} *Access Denied!*")
+        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
         return
     
     conn = sqlite3.connect('bot_database.db')
@@ -346,31 +240,25 @@ def user_list_command(update: Update, context: CallbackContext):
     users = cursor.fetchall()
     conn.close()
     
-    user_list_text = f"{EMOJIS['user']} *Active Users List* {EMOJIS['user']}\n\n"
-    user_list_text += f"*Total Users:* {total_users}\n\n"
+    user_list_text = f"{EMOJIS['user']} Active Users List {EMOJIS['user']}\n\n"
+    user_list_text += f"Total Users: {total_users}\n\n"
     
     for user_id, username, first_name in users:
-        user_info = f"• {first_name} (@{username if username else 'no_username'}) - `{user_id}`\n"
+        user_info = f"• {first_name} (@{username if username else 'N/A'}) - {user_id}\n"
         user_list_text += user_info
     
     if total_users > 50:
-        user_list_text += f"\n{EMOJIS['info']} *Showing first 50 users*"
+        user_list_text += f"\n{EMOJIS['info']} Showing first 50 users"
     
-    update.message.reply_text(
-        user_list_text,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    update.message.reply_text(user_list_text)
 
-def broadcast_command(update: Update, context: CallbackContext):
+def broadcast_message(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        update.message.reply_text(f"{EMOJIS['error']} *Access Denied!*")
+        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
         return
     
     if not context.args:
-        update.message.reply_text(
-            f"{EMOJIS['info']} *Usage:* /broadcast <your_message>\n\n"
-            f"Example: /broadcast Hello everyone! New update available."
-        )
+        update.message.reply_text(f"{EMOJIS['info']} Usage: /broadcast <message>")
         return
     
     message = ' '.join(context.args)
@@ -383,21 +271,11 @@ def broadcast_command(update: Update, context: CallbackContext):
     success = 0
     failed = 0
     
-    broadcast_msg = f"""
-{EMOJIS['broadcast']} *📢 Broadcast Message* {EMOJIS['broadcast']}
-
-{message}
-
----
-*🔔 Sent by Techno Beat's Bot*
-    """
-    
     for user_id, in users:
         try:
             context.bot.send_message(
                 chat_id=user_id,
-                text=broadcast_msg,
-                parse_mode=ParseMode.MARKDOWN
+                text=f"{EMOJIS['broadcast']} Broadcast Message {EMOJIS['broadcast']}\n\n{message}"
             )
             success += 1
         except Exception as e:
@@ -405,10 +283,7 @@ def broadcast_command(update: Update, context: CallbackContext):
         time.sleep(0.1)
     
     update.message.reply_text(
-        f"{EMOJIS['success']} *Broadcast Completed!*\n\n"
-        f"✅ *Success:* {success}\n"
-        f"❌ *Failed:* {failed}",
-        parse_mode=ParseMode.MARKDOWN
+        f"{EMOJIS['success']} Broadcast Completed!\n\n✅ Success: {success}\n❌ Failed: {failed}"
     )
 
 def handle_new_chat_members(update: Update, context: CallbackContext):
@@ -428,7 +303,7 @@ def handle_new_chat_members(update: Update, context: CallbackContext):
             conn.close()
             
             update.message.reply_text(
-                f"{EMOJIS['success']} *Thanks for adding me!* {EMOJIS['success']}\n\n"
+                f"{EMOJIS['success']} Thanks for adding me! {EMOJIS['success']}\n\n"
                 f"I'm now ready to manage this {chat.type}!\n\n"
                 f"Use /settings to configure welcome/leave messages."
             )
@@ -437,20 +312,14 @@ def handle_new_chat_members(update: Update, context: CallbackContext):
             chat_title = update.effective_chat.title
             welcome_msg = WELCOME_MESSAGE.replace(CHANNEL_NAME, chat_title)
             
-            update.message.reply_text(
-                welcome_msg,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            update.message.reply_text(welcome_msg)
 
 def handle_left_chat_member(update: Update, context: CallbackContext):
     if update.message.left_chat_member:
         chat_title = update.effective_chat.title
         leave_msg = LEAVE_MESSAGE.replace(CHANNEL_NAME, chat_title)
         
-        update.message.reply_text(
-            leave_msg,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        update.message.reply_text(leave_msg)
 
 def message_filter(update: Update, context: CallbackContext):
     if not update.message or update.message.chat.type == 'private':
@@ -483,13 +352,10 @@ def message_filter(update: Update, context: CallbackContext):
     if filter_links and re.search(r'https?://|t\.me/|www\.', message_text, re.IGNORECASE):
         try:
             update.message.delete()
-            warning_msg = update.message.reply_text(
-                f"{EMOJIS['warning']} *Links are not allowed here!* {EMOJIS['warning']}",
+            update.message.reply_text(
+                f"{EMOJIS['warning']} Links are not allowed here! {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
-            # Delete warning after 5 seconds
-            time.sleep(5)
-            context.bot.delete_message(chat_id=chat_id, message_id=warning_msg.message_id)
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
         finally:
@@ -497,17 +363,14 @@ def message_filter(update: Update, context: CallbackContext):
             return
     
     # Sexual content filter
-    sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked', 'boobs', 'pussy', 'dick']
+    sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked']
     if filter_sexual and any(keyword in message_text.lower() for keyword in sexual_keywords):
         try:
             update.message.delete()
-            warning_msg = update.message.reply_text(
-                f"{EMOJIS['warning']} *Inappropriate content detected!* {EMOJIS['warning']}",
+            update.message.reply_text(
+                f"{EMOJIS['warning']} Inappropriate content detected! {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
-            # Delete warning after 5 seconds
-            time.sleep(5)
-            context.bot.delete_message(chat_id=chat_id, message_id=warning_msg.message_id)
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
     
@@ -516,7 +379,7 @@ def message_filter(update: Update, context: CallbackContext):
 def settings_command(update: Update, context: CallbackContext):
     if update.effective_chat.type == 'private':
         update.message.reply_text(
-            f"{EMOJIS['settings']} *Settings Menu* {EMOJIS['settings']}\n\n"
+            f"{EMOJIS['settings']} Settings Menu {EMOJIS['settings']}\n\n"
             "This command works in groups/channels only."
         )
         return
@@ -529,11 +392,40 @@ def settings_command(update: Update, context: CallbackContext):
     ]
     
     update.message.reply_text(
-        f"{EMOJIS['settings']} *Group Settings* {EMOJIS['settings']}\n\n"
+        f"{EMOJIS['settings']} Group Settings {EMOJIS['settings']}\n\n"
         "Configure your group settings:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+def help_command(update: Update, context: CallbackContext):
+    help_text = f"""{EMOJIS['info']} Bot Help Guide {EMOJIS['info']}
+
+🤖 Available Commands:
+
+👤 User Commands:
+/start - Start the bot
+/chatid - Get your chat ID
+/help - Show this help message
+
+👑 Admin Commands (Owner Only):
+/userlist - Show active users list
+/broadcast - Broadcast message to all users
+
+⚙️ Group Commands:
+/settings - Configure group settings
+
+🔧 Features:
+• Automatic welcome messages
+• Automatic leave messages
+• Link filtering
+• Content filtering
+• User management
+• Broadcasting
+
+{EMOJIS['channel']} Channel: {CHANNEL_LINK}
+{EMOJIS['info']} Owner: {OWNER_USERNAME}"""
+    
+    update.message.reply_text(help_text)
 
 def main():
     # Create the Updater and pass it your bot's token
@@ -544,13 +436,13 @@ def main():
     
     # Add handlers
     dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_command))
     dp.add_handler(CommandHandler("chatid", get_chat_id))
-    dp.add_handler(CommandHandler("userlist", user_list_command))
-    dp.add_handler(CommandHandler("broadcast", broadcast_command))
+    dp.add_handler(CommandHandler("userlist", user_list))
+    dp.add_handler(CommandHandler("broadcast", broadcast_message))
     dp.add_handler(CommandHandler("settings", settings_command))
     
-    # Callback query handler must be added properly
-    dp.add_handler(CallbackQueryHandler(button_handler, pattern=None))
+    dp.add_handler(CallbackQueryHandler(button_handler))
     
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, handle_new_chat_members))
     dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, handle_left_chat_member))
@@ -558,7 +450,8 @@ def main():
     
     # Start the Bot
     print("🤖 Bot is running...")
-    print("✅ All buttons should work now!")
+    print(f"👑 Owner ID: {OWNER_ID}")
+    print(f"📢 Channel: {CHANNEL_NAME}")
     updater.start_polling()
     
     # Run the bot until you press Ctrl-C
