@@ -51,16 +51,6 @@ def init_db():
         )
     ''')
     
-    # Broadcast messages table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS broadcast_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_text TEXT,
-            sent_by INTEGER,
-            sent_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
     conn.commit()
     conn.close()
 
@@ -127,7 +117,7 @@ def add_user_to_db(user):
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
+        INSERT OR IGNORE INTO users (user_id, username, first_name, last_name)
         VALUES (?, ?, ?, ?)
     ''', (user.id, user.username, user.first_name, user.last_name))
     conn.commit()
@@ -160,11 +150,18 @@ def start(update: Update, context: CallbackContext):
 Use buttons below to navigate:
     """
     
-    update.message.reply_text(
-        welcome_text,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    if update.message:
+        update.message.reply_text(
+            welcome_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        update.callback_query.message.reply_text(
+            welcome_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -187,9 +184,11 @@ def button_handler(update: Update, context: CallbackContext):
 • Broadcast messages
         """
         query.edit_message_text(
-            user_info,
+            text=user_info,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]])
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
+            ])
         )
     
     elif query.data == 'admin_panel':
@@ -199,7 +198,7 @@ def button_handler(update: Update, context: CallbackContext):
                  InlineKeyboardButton(f"{EMOJIS['user']} User List", callback_data='user_list')],
                 [InlineKeyboardButton(f"{EMOJIS['settings']} Settings", callback_data='settings'),
                  InlineKeyboardButton(f"{EMOJIS['info']} Bot Info", callback_data='bot_info')],
-                [InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
             ]
             admin_text = f"""
 {EMOJIS['admin']} *Admin Panel* {EMOJIS['admin']}
@@ -214,33 +213,128 @@ def button_handler(update: Update, context: CallbackContext):
 Select an option:
             """
             query.edit_message_text(
-                admin_text,
+                text=admin_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
             query.edit_message_text(
-                f"{EMOJIS['error']} *Access Denied!* {EMOJIS['error']}\n\nYou are not authorized to access admin panel.",
-                parse_mode=ParseMode.MARKDOWN
+                text=f"{EMOJIS['error']} *Access Denied!* {EMOJIS['error']}\n\nYou are not authorized to access admin panel.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Main", callback_data='back_start')]
+                ])
             )
     
-    elif query.data == 'back_start':
-        context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="Returning to main menu..."
+    elif query.data == 'user_list':
+        if query.from_user.id == OWNER_ID:
+            conn = sqlite3.connect('bot_database.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT user_id, username, first_name FROM users LIMIT 20")
+            users = cursor.fetchall()
+            conn.close()
+            
+            user_list_text = f"{EMOJIS['user']} *Active Users List* {EMOJIS['user']}\n\n"
+            user_list_text += f"*Total Users:* {total_users}\n\n"
+            
+            for user_id, username, first_name in users:
+                user_info = f"• {first_name} (@{username if username else 'no_username'}) - `{user_id}`\n"
+                user_list_text += user_info
+            
+            if total_users > 20:
+                user_list_text += f"\n{EMOJIS['info']} *Showing first 20 users*"
+            
+            query.edit_message_text(
+                text=user_list_text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
+                ])
+            )
+    
+    elif query.data == 'broadcast':
+        if query.from_user.id == OWNER_ID:
+            query.edit_message_text(
+                text=f"{EMOJIS['broadcast']} *Broadcast Message* {EMOJIS['broadcast']}\n\nUse command: /broadcast <your_message>",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
+                ])
+            )
+    
+    elif query.data == 'bot_info':
+        bot_info_text = f"""
+{EMOJIS['info']} *Bot Information* {EMOJIS['info']}
+
+*🤖 Bot Name:* Techno Beat's Bot
+*👑 Owner:* {OWNER_USERNAME}
+*📢 Channel:* [Techno Beat's]({CHANNEL_LINK})
+
+*🛡️ Features:*
+• User Management
+• Content Filtering
+• Broadcasting
+• Welcome/Leave Messages
+• Admin Controls
+
+*🔧 Version:* 2.0
+*✨ Status:* Active
+        """
+        query.edit_message_text(
+            text=bot_info_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"{EMOJIS['settings']} Back to Admin", callback_data='admin_panel')]
+            ])
         )
-        start(update, context)
+    
+    elif query.data == 'back_start':
+        user = query.from_user
+        keyboard = [
+            [InlineKeyboardButton(f"{EMOJIS['channel']} Join Channel", url=CHANNEL_LINK)],
+            [InlineKeyboardButton(f"{EMOJIS['info']} User Info", callback_data='user_info'),
+             InlineKeyboardButton(f"{EMOJIS['admin']} Admin Panel", callback_data='admin_panel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        welcome_text = f"""
+{EMOJIS['welcome']} *Hello {user.first_name}!* {EMOJIS['welcome']}
+
+🤖 *Welcome to Techno Beat's Bot!*
+
+{EMOJIS['success']} *Features Available:*
+• 📊 User Management
+• 🛡️ Content Filtering
+• 📢 Broadcasting
+• 👋 Welcome Messages
+• 😢 Leave Messages
+• 🔧 And much more!
+
+Use buttons below to navigate:
+        """
+        query.edit_message_text(
+            text=welcome_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 def get_chat_id(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    
     update.message.reply_text(
-        f"{EMOJIS['info']} *Chat ID:* `{chat_id}`",
+        f"{EMOJIS['info']} *Chat Information* {EMOJIS['info']}\n\n"
+        f"*👤 Your User ID:* `{user_id}`\n"
+        f"*💬 Current Chat ID:* `{chat_id}`",
         parse_mode=ParseMode.MARKDOWN
     )
 
-def user_list(update: Update, context: CallbackContext):
+def user_list_command(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        update.message.reply_text(f"{EMOJIS['error']} *Access Denied!*")
         return
     
     conn = sqlite3.connect('bot_database.db')
@@ -256,7 +350,7 @@ def user_list(update: Update, context: CallbackContext):
     user_list_text += f"*Total Users:* {total_users}\n\n"
     
     for user_id, username, first_name in users:
-        user_info = f"• {first_name} (@{username if username else 'N/A'}) - `{user_id}`\n"
+        user_info = f"• {first_name} (@{username if username else 'no_username'}) - `{user_id}`\n"
         user_list_text += user_info
     
     if total_users > 50:
@@ -267,14 +361,15 @@ def user_list(update: Update, context: CallbackContext):
         parse_mode=ParseMode.MARKDOWN
     )
 
-def broadcast_message(update: Update, context: CallbackContext):
+def broadcast_command(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        update.message.reply_text(f"{EMOJIS['error']} *Access Denied!*")
         return
     
     if not context.args:
         update.message.reply_text(
-            f"{EMOJIS['info']} Usage: /broadcast <message>"
+            f"{EMOJIS['info']} *Usage:* /broadcast <your_message>\n\n"
+            f"Example: /broadcast Hello everyone! New update available."
         )
         return
     
@@ -288,11 +383,20 @@ def broadcast_message(update: Update, context: CallbackContext):
     success = 0
     failed = 0
     
+    broadcast_msg = f"""
+{EMOJIS['broadcast']} *📢 Broadcast Message* {EMOJIS['broadcast']}
+
+{message}
+
+---
+*🔔 Sent by Techno Beat's Bot*
+    """
+    
     for user_id, in users:
         try:
             context.bot.send_message(
                 chat_id=user_id,
-                text=f"{EMOJIS['broadcast']} *Broadcast Message* {EMOJIS['broadcast']}\n\n{message}",
+                text=broadcast_msg,
                 parse_mode=ParseMode.MARKDOWN
             )
             success += 1
@@ -301,7 +405,9 @@ def broadcast_message(update: Update, context: CallbackContext):
         time.sleep(0.1)
     
     update.message.reply_text(
-        f"{EMOJIS['success']} *Broadcast Completed!*\n\n✅ Success: {success}\n❌ Failed: {failed}",
+        f"{EMOJIS['success']} *Broadcast Completed!*\n\n"
+        f"✅ *Success:* {success}\n"
+        f"❌ *Failed:* {failed}",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -377,10 +483,13 @@ def message_filter(update: Update, context: CallbackContext):
     if filter_links and re.search(r'https?://|t\.me/|www\.', message_text, re.IGNORECASE):
         try:
             update.message.delete()
-            update.message.reply_text(
+            warning_msg = update.message.reply_text(
                 f"{EMOJIS['warning']} *Links are not allowed here!* {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
+            # Delete warning after 5 seconds
+            time.sleep(5)
+            context.bot.delete_message(chat_id=chat_id, message_id=warning_msg.message_id)
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
         finally:
@@ -388,14 +497,17 @@ def message_filter(update: Update, context: CallbackContext):
             return
     
     # Sexual content filter
-    sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked']
+    sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked', 'boobs', 'pussy', 'dick']
     if filter_sexual and any(keyword in message_text.lower() for keyword in sexual_keywords):
         try:
             update.message.delete()
-            update.message.reply_text(
+            warning_msg = update.message.reply_text(
                 f"{EMOJIS['warning']} *Inappropriate content detected!* {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
+            # Delete warning after 5 seconds
+            time.sleep(5)
+            context.bot.delete_message(chat_id=chat_id, message_id=warning_msg.message_id)
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
     
@@ -433,17 +545,20 @@ def main():
     # Add handlers
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("chatid", get_chat_id))
-    dp.add_handler(CommandHandler("userlist", user_list))
-    dp.add_handler(CommandHandler("broadcast", broadcast_message))
+    dp.add_handler(CommandHandler("userlist", user_list_command))
+    dp.add_handler(CommandHandler("broadcast", broadcast_command))
     dp.add_handler(CommandHandler("settings", settings_command))
     
-    dp.add_handler(CallbackQueryHandler(button_handler))
+    # Callback query handler must be added properly
+    dp.add_handler(CallbackQueryHandler(button_handler, pattern=None))
     
     dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, handle_new_chat_members))
     dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, handle_left_chat_member))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_filter))
     
     # Start the Bot
+    print("🤖 Bot is running...")
+    print("✅ All buttons should work now!")
     updater.start_polling()
     
     # Run the bot until you press Ctrl-C
