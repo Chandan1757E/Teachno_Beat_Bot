@@ -2,9 +2,9 @@ import logging
 import sqlite3
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-from telegram.constants import ParseMode
-import asyncio
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+from telegram.parsemode import ParseMode
+import time
 
 # Bot Configuration
 BOT_TOKEN = "6990761692:AAHI_E2l00AJxr9ue4mRKjG5uetPBXKp0rk"
@@ -18,6 +18,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
 # Database setup
 def init_db():
@@ -121,8 +122,21 @@ If you have any concerns or suggestions, please contact {OWNER_USERNAME}
 We hope to see you again soon! 🌟
 """
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def add_user_to_db(user):
+    """Add user to database"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO users (user_id, username, first_name, last_name)
+        VALUES (?, ?, ?, ?)
+    ''', (user.id, user.username, user.first_name, user.last_name))
+    conn.commit()
+    conn.close()
+
+def start(update: Update, context: CallbackContext):
     user = update.effective_user
+    add_user_to_db(user)
+    
     keyboard = [
         [InlineKeyboardButton(f"{EMOJIS['channel']} Join Channel", url=CHANNEL_LINK)],
         [InlineKeyboardButton(f"{EMOJIS['info']} User Info", callback_data='user_info'),
@@ -146,15 +160,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Use buttons below to navigate:
     """
     
-    await update.message.reply_text(
+    update.message.reply_text(
         welcome_text,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.data == 'user_info':
         user = query.from_user
@@ -172,7 +186,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Content filtering
 • Broadcast messages
         """
-        await query.edit_message_text(
+        query.edit_message_text(
             user_info,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"{EMOJIS['settings']} Back", callback_data='back_start')]])
@@ -199,30 +213,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Select an option:
             """
-            await query.edit_message_text(
+            query.edit_message_text(
                 admin_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
-            await query.edit_message_text(
+            query.edit_message_text(
                 f"{EMOJIS['error']} *Access Denied!* {EMOJIS['error']}\n\nYou are not authorized to access admin panel.",
                 parse_mode=ParseMode.MARKDOWN
             )
     
     elif query.data == 'back_start':
-        await start(update, context)
+        context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Returning to main menu..."
+        )
+        start(update, context)
 
-async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def get_chat_id(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
-    await update.message.reply_text(
+    update.message.reply_text(
         f"{EMOJIS['info']} *Chat ID:* `{chat_id}`",
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def user_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def user_list(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
         return
     
     conn = sqlite3.connect('bot_database.db')
@@ -241,18 +259,21 @@ async def user_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info = f"• {first_name} (@{username if username else 'N/A'}) - `{user_id}`\n"
         user_list_text += user_info
     
-    await update.message.reply_text(
+    if total_users > 50:
+        user_list_text += f"\n{EMOJIS['info']} *Showing first 50 users*"
+    
+    update.message.reply_text(
         user_list_text,
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def broadcast_message(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
+        update.message.reply_text(f"{EMOJIS['error']} Access Denied!")
         return
     
     if not context.args:
-        await update.message.reply_text(
+        update.message.reply_text(
             f"{EMOJIS['info']} Usage: /broadcast <message>"
         )
         return
@@ -269,23 +290,25 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     for user_id, in users:
         try:
-            await context.bot.send_message(
+            context.bot.send_message(
                 chat_id=user_id,
                 text=f"{EMOJIS['broadcast']} *Broadcast Message* {EMOJIS['broadcast']}\n\n{message}",
                 parse_mode=ParseMode.MARKDOWN
             )
             success += 1
-        except:
+        except Exception as e:
             failed += 1
-        await asyncio.sleep(0.1)
+        time.sleep(0.1)
     
-    await update.message.reply_text(
+    update.message.reply_text(
         f"{EMOJIS['success']} *Broadcast Completed!*\n\n✅ Success: {success}\n❌ Failed: {failed}",
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_new_chat_members(update: Update, context: CallbackContext):
     for member in update.message.new_chat_members:
+        add_user_to_db(member)
+        
         if member.id == context.bot.id:
             # Bot added to group/channel
             chat = update.effective_chat
@@ -298,7 +321,7 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
             conn.commit()
             conn.close()
             
-            await update.message.reply_text(
+            update.message.reply_text(
                 f"{EMOJIS['success']} *Thanks for adding me!* {EMOJIS['success']}\n\n"
                 f"I'm now ready to manage this {chat.type}!\n\n"
                 f"Use /settings to configure welcome/leave messages."
@@ -308,22 +331,22 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
             chat_title = update.effective_chat.title
             welcome_msg = WELCOME_MESSAGE.replace(CHANNEL_NAME, chat_title)
             
-            await update.message.reply_text(
+            update.message.reply_text(
                 welcome_msg,
                 parse_mode=ParseMode.MARKDOWN
             )
 
-async def handle_left_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_left_chat_member(update: Update, context: CallbackContext):
     if update.message.left_chat_member:
         chat_title = update.effective_chat.title
         leave_msg = LEAVE_MESSAGE.replace(CHANNEL_NAME, chat_title)
         
-        await update.message.reply_text(
+        update.message.reply_text(
             leave_msg,
             parse_mode=ParseMode.MARKDOWN
         )
 
-async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def message_filter(update: Update, context: CallbackContext):
     if not update.message or update.message.chat.type == 'private':
         return
     
@@ -332,8 +355,11 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     
     # Check if user is admin
-    chat_member = await context.bot.get_chat_member(chat_id, user_id)
-    if chat_member.status in ['administrator', 'creator']:
+    try:
+        chat_member = context.bot.get_chat_member(chat_id, user_id)
+        if chat_member.status in ['administrator', 'creator']:
+            return
+    except:
         return
     
     conn = sqlite3.connect('bot_database.db')
@@ -350,13 +376,13 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Link filter
     if filter_links and re.search(r'https?://|t\.me/|www\.', message_text, re.IGNORECASE):
         try:
-            await update.message.delete()
-            await update.message.reply_text(
+            update.message.delete()
+            update.message.reply_text(
                 f"{EMOJIS['warning']} *Links are not allowed here!* {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
         finally:
             conn.close()
             return
@@ -365,19 +391,19 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sexual_keywords = ['porn', 'xxx', 'adult', 'nsfw', 'sex', 'nude', 'naked']
     if filter_sexual and any(keyword in message_text.lower() for keyword in sexual_keywords):
         try:
-            await update.message.delete()
-            await update.message.reply_text(
+            update.message.delete()
+            update.message.reply_text(
                 f"{EMOJIS['warning']} *Inappropriate content detected!* {EMOJIS['warning']}",
                 reply_to_message_id=update.message.message_id
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
     
     conn.close()
 
-async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def settings_command(update: Update, context: CallbackContext):
     if update.effective_chat.type == 'private':
-        await update.message.reply_text(
+        update.message.reply_text(
             f"{EMOJIS['settings']} *Settings Menu* {EMOJIS['settings']}\n\n"
             "This command works in groups/channels only."
         )
@@ -390,7 +416,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton(f"{EMOJIS['settings']} Set Leave Message", callback_data='set_leave')]
     ]
     
-    await update.message.reply_text(
+    update.message.reply_text(
         f"{EMOJIS['settings']} *Group Settings* {EMOJIS['settings']}\n\n"
         "Configure your group settings:",
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -398,24 +424,30 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Create the Updater and pass it your bot's token
+    updater = Updater(BOT_TOKEN, use_context=True)
     
-    # Handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("chatid", get_chat_id))
-    application.add_handler(CommandHandler("userlist", user_list))
-    application.add_handler(CommandHandler("broadcast", broadcast_message))
-    application.add_handler(CommandHandler("settings", settings_command))
+    # Get the dispatcher to register handlers
+    dp = updater.dispatcher
     
-    application.add_handler(CallbackQueryHandler(button_handler))
+    # Add handlers
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("chatid", get_chat_id))
+    dp.add_handler(CommandHandler("userlist", user_list))
+    dp.add_handler(CommandHandler("broadcast", broadcast_message))
+    dp.add_handler(CommandHandler("settings", settings_command))
     
-    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_chat_members))
-    application.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, handle_left_chat_member))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_filter))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    
+    dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, handle_new_chat_members))
+    dp.add_handler(MessageHandler(Filters.status_update.left_chat_member, handle_left_chat_member))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_filter))
     
     # Start the Bot
-    print("Bot is running...")
-    application.run_polling()
+    updater.start_polling()
+    
+    # Run the bot until you press Ctrl-C
+    updater.idle()
 
 if __name__ == '__main__':
     main()
