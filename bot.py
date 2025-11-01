@@ -7,7 +7,7 @@ from telegram.parsemode import ParseMode
 import time
 
 # Bot Configuration
-BOT_TOKEN = "6990761692:AAHI_E2l00AJxr9ue4mRKjG5uetPBXKp0rk"
+BOT_TOKEN = "6990761692:AAF5g_sApUbCGE14r0moqCrF1cwfXQn1T-8"
 CHANNEL_LINK = "https://t.me/Techno_Beats_Redirect"
 OWNER_ID = 1614927658
 OWNER_USERNAME = "@Chandan1757E"
